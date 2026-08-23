@@ -1,0 +1,72 @@
+# Local dev stack: ma-stream, sl-stream and a test page in one container.
+#
+#   cd ma-stream/devstack && docker compose up --build
+#   open http://localhost:8080
+#
+# The build context is the parent of both checkouts, because the image needs each of them.
+
+services:
+  db:
+    image: postgres:17-alpine
+    environment:
+      POSTGRES_USER: devstack
+      POSTGRES_PASSWORD: devstack
+      POSTGRES_DB: stack
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U devstack -d stack"]
+      interval: 2s
+      timeout: 3s
+      retries: 30
+    volumes:
+      # Keeps resolved records across restarts. `docker compose down -v` starts clean.
+      - stack-db:/var/lib/postgresql/data
+
+  stack:
+    depends_on:
+      db:
+        condition: service_healthy
+    build:
+      context: ../..
+      dockerfile: ma-stream/devstack/Dockerfile
+    image: ma-stack:dev
+    ports:
+      - "8080:8080" # test page
+      - "8201:8201" # ma-stream
+      - "8202:8202" # sl-stream
+    environment:
+      # Both services and the dev page against the one database. The entrypoint applies the schema
+      # before either service starts.
+      MA_DATABASE_URL: postgresql://devstack:devstack@db:5432/stack
+      SL_DATABASE_URL: postgresql://devstack:devstack@db:5432/stack
+
+      # Shared between sl-stream's refresh client and ma-stream's route. Local only.
+      MA_REFRESH_TOKEN: devstack-local-token
+      # The page is served from :8080 and calls ma-stream on :8201, so it needs CORS.
+      MA_CORS_ORIGIN: "*"
+
+      # Tuned down from production defaults: a local test should fail fast rather than sit on a
+      # 45-second deadline while you wonder whether it is working.
+      MA_RESOLVE_DEADLINE_MS: "30000"
+      MA_REFRESH_DEADLINE_MS: "12000"
+      MA_MIN_PEERS: "15"
+      MA_REFRESH_MIN_PEERS: "10"
+      MA_PEER_GRACE_MS: "3000"
+      MA_LOG_LEVEL: info
+
+      # Short enough that "Backdate 1h" on the page actually trips the staleness trigger.
+      SL_PEERS_MAX_AGE_MS: "600000"
+      SL_REFRESH_COOLDOWN_MS: "15000"
+      SL_LOG_LEVEL: info
+
+      # The page prefills this.
+      DEVSTACK_DEFAULT_MAGNET: >-
+        magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=Big+Buck+Bunny&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337&tr=udp%3A%2F%2Fexplodie.org%3A6969
+    healthcheck:
+      test: ["CMD", "deno", "eval", "await fetch('http://localhost:8080/dev/config')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 15s
+
+volumes:
+  stack-db:

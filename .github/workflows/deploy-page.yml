@@ -1,0 +1,109 @@
+# Publish `devstack/public` to GitHub Pages, pointed at the deployed services.
+#
+# The page is the dev stack's test page with the dev server taken away: `devstack/server.ts` reaches
+# straight into KV, which only exists inside the local container, so what is deployed here is the
+# static half — resolve a magnet against ma-stream, stream it from sl-stream, check a range comes
+# back. The page turns off the KV-backed controls by itself when `dev/config` says `live`.
+#
+# Two things have to be true on the services for this to work at all:
+#
+#   * ma-stream must send CORS for the Pages origin: MA_CORS_ORIGIN=https://<owner>.github.io
+#     (comma-separated, so an existing origin stays listed: MA_CORS_ORIGIN=https://a,https://b)
+#   * sl-stream must send `cross-origin-resource-policy: cross-origin`, which it already does.
+#
+# Configure the target with repository variables (Settings → Secrets and variables → Actions →
+# Variables), not secrets — every value here ends up in a world-readable artifact:
+#
+#   MA_URL          e.g. https://ma.example.com     (no trailing slash)
+#   SL_URL          e.g. https://sl.example.deno.net
+#   DEFAULT_MAGNET  optional; the magnet the page prefills
+#
+# The refresh token is deliberately *not* deployed. It is a shared secret and this artifact is
+# public; open the page with `#token=…` to enable the "Refresh peers" button for a session.
+
+name: Deploy test page
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - devstack/public/**
+      - devstack/vendor.ts
+      - .github/workflows/deploy-page.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One deployment at a time, and a superseded run has nothing worth finishing.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: denoland/setup-deno@v2
+        with:
+          deno-version: v2.x
+
+      # ~18 MiB of wasm from two hosts. Pinned inside vendor.ts, so its hash is the whole key.
+      - name: Cache vendored libmedia
+        uses: actions/cache@v4
+        with:
+          path: devstack/public/vendor
+          key: libmedia-${{ hashFiles('devstack/vendor.ts') }}
+
+      # Idempotent: a cache hit leaves every file alone and this is a no-op.
+      - name: Vendor the player
+        run: deno run -A devstack/vendor.ts
+
+      - name: Assemble the site
+        env:
+          MA_URL: ${{ vars.MA_URL }}
+          SL_URL: ${{ vars.SL_URL }}
+          DEFAULT_MAGNET: ${{ vars.DEFAULT_MAGNET }}
+        run: |
+          set -euo pipefail
+
+          # A missing url would deploy a page whose every request goes to the wrong origin and whose
+          # failure looks like a dead service. Fail here instead.
+          for name in MA_URL SL_URL; do
+            if [ -z "${!name}" ]; then
+              echo "::error::repository variable $name is not set" >&2
+              exit 1
+            fi
+          done
+
+          mkdir -p _site/dev
+          cp -r devstack/public/. _site/
+          # Pages runs Jekyll otherwise, which would drop the vendored files it does not recognise.
+          touch _site/.nojekyll
+
+          # What `devstack/server.ts` serves from GET /dev/config, minus the token. `live` is what
+          # tells the page there is no dev server behind it.
+          jq -n \
+            --arg maUrl "${MA_URL%/}" \
+            --arg slUrl "${SL_URL%/}" \
+            --arg defaultMagnet "$DEFAULT_MAGNET" \
+            '{maUrl: $maUrl, slUrl: $slUrl, defaultMagnet: $defaultMagnet, refreshToken: "", live: true}' \
+            > _site/dev/config
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - id: deployment
+        uses: actions/deploy-pages@v4

@@ -1,0 +1,1071 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>ma-stream · sl-stream dev stack</title>
+    <style>
+      :root {
+        color-scheme: light dark;
+        --bg: #fbfbfc;
+        --panel: #ffffff;
+        --ink: #16181d;
+        --muted: #6b7280;
+        --line: #e3e5ea;
+        --accent: #3b5bdb;
+        --ok: #1f7a4d;
+        --warn: #9a6700;
+        --bad: #b42318;
+        --mono: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+      }
+      @media (prefers-color-scheme: dark) {
+        :root {
+          --bg: #101216;
+          --panel: #171a20;
+          --ink: #e7e9ee;
+          --muted: #9aa1ad;
+          --line: #262a33;
+          --accent: #7f9cf5;
+          --ok: #5bc98c;
+          --warn: #e0b341;
+          --bad: #f27272;
+        }
+      }
+      * {
+        box-sizing: border-box;
+      }
+      body {
+        margin: 0;
+        padding: 24px 20px 64px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+      }
+      .wrap {
+        max-width: 1080px;
+        margin: 0 auto;
+      }
+      header {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 12px;
+        align-items: baseline;
+        margin-bottom: 4px;
+      }
+      h1 {
+        font-size: 20px;
+        margin: 0;
+        letter-spacing: -0.01em;
+      }
+      h2 {
+        font-size: 13px;
+        text-transform: uppercase;
+        letter-spacing: 0.08em;
+        color: var(--muted);
+        margin: 0 0 12px;
+        font-weight: 600;
+      }
+      .sub {
+        color: var(--muted);
+        font-size: 13px;
+        margin: 0 0 20px;
+      }
+      .grid {
+        display: grid;
+        gap: 16px;
+        grid-template-columns: 1fr;
+      }
+      @media (min-width: 900px) {
+        .grid.two {
+          grid-template-columns: 1fr 1fr;
+        }
+      }
+      .card {
+        background: var(--panel);
+        border: 1px solid var(--line);
+        border-radius: 10px;
+        padding: 16px;
+        margin-bottom: 16px;
+      }
+      label {
+        display: block;
+        font-size: 13px;
+        color: var(--muted);
+        margin-bottom: 6px;
+      }
+      input[type="text"] {
+        width: 100%;
+        padding: 9px 11px;
+        border: 1px solid var(--line);
+        border-radius: 7px;
+        background: var(--bg);
+        color: var(--ink);
+        font: 13px/1.4 var(--mono);
+      }
+      input[type="text"]:focus {
+        outline: 2px solid var(--accent);
+        outline-offset: -1px;
+      }
+      .row {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 8px;
+        margin-top: 12px;
+        align-items: center;
+      }
+      button {
+        padding: 8px 14px;
+        border-radius: 7px;
+        border: 1px solid var(--line);
+        background: var(--panel);
+        color: var(--ink);
+        font: inherit;
+        font-size: 13px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      button:hover:not(:disabled) {
+        border-color: var(--accent);
+      }
+      button:disabled {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      button.primary {
+        background: var(--accent);
+        border-color: var(--accent);
+        color: #fff;
+      }
+      .pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 12px;
+        padding: 3px 9px;
+        border-radius: 999px;
+        border: 1px solid var(--line);
+        color: var(--muted);
+      }
+      .dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        background: var(--muted);
+      }
+      .dot.up {
+        background: var(--ok);
+      }
+      .dot.down {
+        background: var(--bad);
+      }
+      dl {
+        display: grid;
+        grid-template-columns: max-content 1fr;
+        gap: 6px 16px;
+        margin: 0;
+        font-size: 13px;
+      }
+      dt {
+        color: var(--muted);
+      }
+      dd {
+        margin: 0;
+        font-family: var(--mono);
+        font-size: 12.5px;
+        word-break: break-all;
+      }
+      #libmedia {
+        width: 100%;
+        aspect-ratio: 16 / 9;
+        border-radius: 8px;
+        background: #000;
+        margin-top: 4px;
+        display: block;
+        overflow: hidden;
+        /* libmedia positions its surface absolutely, so this has to be its containing block. */
+        position: relative;
+      }
+      #libmedia[hidden] {
+        display: none;
+      }
+      /* Force the player onto its own compositing layer. libmedia renders WebGL into a canvas it
+         hands to a worker, and such a canvas can be composited on a frame where its drawing buffer
+         has been discarded — which reads as the picture flashing black for a frame or two. */
+      #libmedia canvas {
+        transform: translateZ(0);
+        will-change: transform;
+        backface-visibility: hidden;
+      }
+      /* libmedia's UI ships an "open a file / paste a url" panel and a project link. The page
+         supplies the source, so both are only in the way. */
+      #libmedia .avplayer-ui-folder-container,
+      #libmedia .avplayer-ui-header {
+        display: none;
+      }
+      /* The sheet's `label` is a block with a bottom margin, for the form fields above; a checkbox
+         label sitting in a button row is neither. */
+      .opt {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        margin-bottom: 0;
+        font-size: 13px;
+        color: var(--muted);
+        cursor: pointer;
+      }
+      .opt:has(:disabled) {
+        opacity: 0.5;
+        cursor: not-allowed;
+      }
+      #player-stats {
+        font: 11.5px/1.6 var(--mono);
+        color: var(--muted);
+        margin: 8px 0 0;
+        min-height: 18px;
+        word-break: break-word;
+      }
+      #log {
+        font: 12px/1.65 var(--mono);
+        background: var(--bg);
+        border: 1px solid var(--line);
+        border-radius: 8px;
+        padding: 12px;
+        height: 260px;
+        overflow: auto;
+        white-space: pre-wrap;
+      }
+      .l-ok {
+        color: var(--ok);
+      }
+      .l-warn {
+        color: var(--warn);
+      }
+      .l-bad {
+        color: var(--bad);
+      }
+      .l-dim {
+        color: var(--muted);
+      }
+      .empty {
+        color: var(--muted);
+        font-size: 13px;
+      }
+      /* The tree can be long — a season pack is forty rows — so it scrolls inside the card rather
+         than pushing the player off the screen. */
+      #filetree {
+        font: 12.5px/1.7 var(--mono);
+        max-height: 260px;
+        overflow: auto;
+      }
+      #filetree ul {
+        list-style: none;
+        margin: 0;
+        padding-left: 14px;
+      }
+      #filetree > ul {
+        padding-left: 0;
+      }
+      #filetree li {
+        white-space: nowrap;
+      }
+      .dir {
+        color: var(--muted);
+      }
+      /* One grid per row so the sizes line up down the right regardless of name length. */
+      .leaf {
+        display: flex;
+        gap: 8px;
+        align-items: baseline;
+      }
+      .leaf .size {
+        color: var(--muted);
+        margin-left: auto;
+        padding-left: 12px;
+      }
+      .leaf .name {
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+      /* A playable file is a button; everything else is text, which is the whole affordance. */
+      button.leaf {
+        width: 100%;
+        text-align: left;
+        border-color: transparent;
+        background: none;
+        padding: 2px 6px;
+        font: inherit;
+        color: var(--ink);
+      }
+      button.leaf:hover:not(:disabled) {
+        border-color: var(--line);
+        background: var(--bg);
+      }
+      button.leaf[aria-current="true"] {
+        color: var(--accent);
+        font-weight: 600;
+      }
+      .leaf.inert {
+        color: var(--muted);
+        padding: 2px 6px;
+      }
+      .leaf .tag {
+        font-size: 11px;
+        color: var(--accent);
+      }
+      .note {
+        font-size: 12.5px;
+        color: var(--muted);
+        border-left: 2px solid var(--line);
+        padding-left: 10px;
+        margin-top: 12px;
+      }
+      code {
+        font-family: var(--mono);
+        font-size: 12.5px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <header>
+        <h1>ma-stream · sl-stream</h1>
+        <span class="pill"><span class="dot" id="ma-dot"></span> ma-stream <span
+            id="ma-url"
+          ></span></span>
+        <span class="pill"><span class="dot" id="sl-dot"></span> sl-stream <span
+            id="sl-url"
+          ></span></span>
+      </header>
+      <p class="sub" id="sub">
+        Local dev stack. ma-stream resolves a magnet into an id plus the peer and chunk records;
+        sl-stream streams the video from those records over the BitTorrent peer wire.
+      </p>
+
+      <div class="card">
+        <h2>1 · Resolve a magnet</h2>
+        <label for="magnet">Magnet URI</label>
+        <input type="text" id="magnet" spellcheck="false" placeholder="magnet:?xt=urn:btih:…">
+        <div class="row">
+          <button class="primary" id="resolve">Resolve</button>
+          <button id="reresolve" title="Re-run discovery and overwrite the stored records">
+            Force re-resolve
+          </button>
+          <button id="preset">Load Big Buck Bunny</button>
+          <span id="resolve-status" class="empty"></span>
+        </div>
+        <p class="note">
+          A resolve walks trackers, the DHT and PEX while fetching metadata over BEP-9, then
+          verifies
+          <code>SHA-1(info dict) === infohash</code> before writing anything.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2>2 · What was resolved</h2>
+        <div class="grid two">
+          <div id="state"><p class="empty">Resolve something first.</p></div>
+          <div id="tree-pane">
+            <p class="empty" id="tree-empty">The torrent's contents appear here.</p>
+            <div id="filetree" hidden></div>
+          </div>
+        </div>
+        <div class="row">
+          <button id="reload" disabled>Reload</button>
+          <button id="refresh" disabled title="Ask ma-stream to rediscover peers">
+            Refresh peers
+          </button>
+          <label class="opt" for="opt-all-files" title="Show files no player could open">
+            <input type="checkbox" id="opt-all-files"> All files
+          </label>
+          <label class="opt" for="opt-padding" title="Show BEP-47 alignment padding">
+            <input type="checkbox" id="opt-padding"> Padding
+          </label>
+        </div>
+        <p class="note" id="tree-note">
+          Every file the torrent contains, in the order sl-stream's <code>?file=</code> indexes
+          them. Pick any playable one — the pieces are shared, so switching costs no rediscovery.
+        </p>
+      </div>
+
+      <div class="card">
+        <h2 id="play-heading">3 · Play</h2>
+        <div id="libmedia" hidden></div>
+        <div class="row">
+          <button id="play" disabled>Load into player</button>
+          <button id="probe" disabled title="Fetch one piece-aligned range and verify its SHA-1">
+            Verify a piece
+          </button>
+          <label class="opt" for="opt-captions" title="Show or hide the subtitle track">
+            <input type="checkbox" id="opt-captions" checked> Captions
+          </label>
+          <label
+            class="opt"
+            for="opt-webgpu"
+            title="Render through WebGPU rather than WebGL — reloads the page to apply"
+          >
+            <input type="checkbox" id="opt-webgpu"> WebGPU
+          </label>
+          <span id="play-status" class="empty"></span>
+        </div>
+        <p class="note" id="codec-info">
+          Nothing loaded. Everything plays through libmedia — Matroska, AVI, HEVC, AC-3, DTS and
+          the rest are decoded in WebAssembly, and the source is still fetched by range.
+        </p>
+        <p id="player-stats"></p>
+      </div>
+
+      <div class="card">
+        <h2>Log</h2>
+        <div id="log"></div>
+      </div>
+    </div>
+
+    <script src="player.js"></script>
+    <script>
+      const $ = (id) => document.getElementById(id);
+      const BBB = "magnet:?xt=urn:btih:dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c&dn=Big+Buck+Bunny" +
+        "&tr=udp%3A%2F%2Ftracker.opentrackr.org%3A1337" +
+        "&tr=udp%3A%2F%2Fexplodie.org%3A6969";
+
+      /**
+       * Carries the resolved id and the chosen file across the reload the WebGPU toggle needs,
+       * as `<id>:<fileIndex>`. Used once, then gone.
+       */
+      const RESUME_KEY = "ma-stream.player.resume";
+
+      let cfg = { maUrl: "", slUrl: "", refreshToken: "", defaultMagnet: "", live: false };
+      let currentId = null;
+      /** Files as the chunk record lists them; the index into this is what `?file=` takes. */
+      let currentFiles = [];
+      /** Which of them plays. Null until a resolve, then the record's own pick until changed. */
+      let selectedFile = null;
+      /** Whether a stream has been handed to the player, so a file switch knows to reload it. */
+      let playing = false;
+
+      /**
+       * The state panel's data when there is no dev server behind the page.
+       *
+       * The `/dev/*` endpoints reach straight into KV, which only exists inside the dev container.
+       * Deployed against the live services the page is a static file, so the panel is rebuilt from
+       * what `/resolve` and `/refresh` return instead. That covers everything except the peer
+       * record's own `resolvedAt`, the webseed count and the stored piece hashes — those are only
+       * in KV, and the parts of the page that need them are turned off in this mode.
+       */
+      let liveState = null;
+
+      function stateFromResolve(body) {
+        return {
+          index: { name: body.name },
+          peers: {
+            bt: body.peerCount,
+            verified: body.verifiedPeerCount,
+            webseeds: null,
+            resolvedAt: Date.now(),
+          },
+          chunks: {
+            name: body.name,
+            pieceLength: body.pieceLength,
+            pieceCount: body.pieceCount,
+            totalLength: body.totalLength,
+            filePath: body.file?.path,
+            fileIndex: body.file?.index,
+            fileOffset: body.file?.offset,
+            fileLength: body.file?.length,
+            mime: body.file?.mime,
+            // `/resolve` reports the same list the chunk record holds, so the tree is identical
+            // whether it was built from KV or from the response.
+            files: body.files ?? null,
+            filesTruncated: body.filesTruncated === true,
+            resolvedAt: Date.now(),
+            hashBytes: 0,
+          },
+        };
+      }
+
+      function log(message, kind = "") {
+        const line = document.createElement("div");
+        if (kind) line.className = "l-" + kind;
+        const now = new Date().toISOString().slice(11, 23);
+        line.textContent = `${now}  ${message}`;
+        $("log").appendChild(line);
+        $("log").scrollTop = $("log").scrollHeight;
+      }
+
+      function bytes(n) {
+        if (!Number.isFinite(n)) return "—";
+        const units = ["B", "KiB", "MiB", "GiB", "TiB"];
+        let i = 0;
+        while (n >= 1024 && i < units.length - 1) {
+          n /= 1024;
+          i++;
+        }
+        return `${n.toFixed(i === 0 ? 0 : 1)} ${units[i]}`;
+      }
+
+      function ago(ts) {
+        if (!ts) return "—";
+        const s = Math.round((Date.now() - ts) / 1000);
+        if (s < 60) return `${s}s ago`;
+        if (s < 3600) return `${Math.round(s / 60)}m ago`;
+        return `${(s / 3600).toFixed(1)}h ago`;
+      }
+
+      /**
+       * Player preferences, remembered across reloads.
+       *
+       * Wrapped because `localStorage` throws rather than returning null in a partitioned or
+       * storage-blocked context, and a checkbox must not be able to take `boot` down with it. The
+       * cost of losing them is that the toggles start at their defaults.
+       */
+      function pref(key, fallback) {
+        try {
+          const stored = localStorage.getItem(`ma-stream.player.${key}`);
+          return stored === null ? fallback : stored === "1";
+        } catch {
+          return fallback;
+        }
+      }
+
+      function setPref(key, value) {
+        try {
+          localStorage.setItem(`ma-stream.player.${key}`, value ? "1" : "0");
+        } catch {
+          // Nothing to do and nothing worth saying: the toggle still works for this page load.
+        }
+      }
+
+      /**
+       * Hook the two player toggles up to `player.js` and to storage.
+       *
+       * WebGPU is a machine capability before it is a preference, so a machine without an adapter
+       * gets the box turned off and disabled rather than a toggle that silently does nothing.
+       */
+      function initPlayerOptions() {
+        const captions = pref("captions", true);
+        $("opt-captions").checked = captions;
+        CodecPlayer.setCaptions(captions);
+
+        if (!CodecPlayer.webgpuAvailable()) {
+          $("opt-webgpu").checked = false;
+          $("opt-webgpu").disabled = true;
+          $("opt-webgpu").parentElement.title =
+            "No WebGPU adapter on this machine — rendering is WebGL";
+          return;
+        }
+        const webgpu = pref("webgpu", true);
+        $("opt-webgpu").checked = webgpu;
+        CodecPlayer.setWebGPU(webgpu);
+      }
+
+      /** The id and file the WebGPU toggle left behind, if this load is that reload. Read once. */
+      function takeResume() {
+        try {
+          const stored = sessionStorage.getItem(RESUME_KEY);
+          sessionStorage.removeItem(RESUME_KEY);
+          if (!stored) return null;
+          const [id, file] = stored.split(":");
+          return { id, file: file === "" ? null : Number(file) };
+        } catch {
+          return null;
+        }
+      }
+
+      async function health(url, dot, label) {
+        try {
+          const response = await fetch(url + "/healthz", { cache: "no-store" });
+          $(dot).className = "dot " + (response.ok ? "up" : "down");
+        } catch {
+          $(dot).className = "dot down";
+        }
+        // A local service is identified by its port; a deployed one has none, so name the host.
+        const parsed = new URL(url);
+        $(label).textContent = parsed.port || parsed.host;
+      }
+
+      /**
+       * Turn off everything that needs the dev server, and say why.
+       *
+       * The verify step's assertion is a comparison against the torrent's own piece hashes, which
+       * live only in KV and are not reachable from a static page. Everything else survives intact:
+       * resolve, the file tree, file selection and streaming all run against the live services.
+       */
+      function enterLiveMode() {
+        $("sub").textContent =
+          "Live services. ma-stream resolves a magnet into an id plus the peer and chunk records; " +
+          "sl-stream streams the video from those records over the BitTorrent peer wire.";
+        if (!cfg.refreshToken) {
+          $("refresh").title =
+            "Needs the refresh token — open this page with #token=… to enable it";
+        }
+      }
+
+      async function boot() {
+        // Relative, not rooted: the page is served from the site root by the dev container and from
+        // a repository subpath on GitHub Pages.
+        cfg = await (await fetch("dev/config", { cache: "no-store" })).json();
+        // Never baked into a deployed page: it is a shared secret, and the artifact is public.
+        // `#token=…` keeps it out of the request line and out of any server log.
+        const hash = new URLSearchParams(location.hash.slice(1));
+        if (hash.get("token")) cfg.refreshToken = hash.get("token");
+        if (cfg.live) enterLiveMode();
+        initPlayerOptions();
+        $("magnet").value = cfg.defaultMagnet || BBB;
+        await Promise.all([
+          health(cfg.maUrl, "ma-dot", "ma-url"),
+          health(cfg.slUrl, "sl-dot", "sl-url"),
+        ]);
+        setInterval(() => {
+          health(cfg.maUrl, "ma-dot", "ma-url");
+          health(cfg.slUrl, "sl-dot", "sl-url");
+        }, 10000);
+        // Worth stating: without it libmedia decodes on the main thread, which is the difference
+        // between a stuttering HEVC fallback and a working one.
+        log(
+          `dev stack ready · cross-origin isolated: ${crossOriginIsolated}`,
+          crossOriginIsolated ? "dim" : "warn",
+        );
+
+        // This load is the one the WebGPU toggle asked for: put the id back and start playing, so
+        // switching renderer costs a click rather than a resolve. The state panel is rebuilt from
+        // KV, which the deployed page has no access to — there it simply stays empty.
+        const resume = takeResume();
+        if (resume) {
+          currentId = resume.id;
+          selectedFile = resume.file;
+          setEnabled(true);
+          await loadState();
+          log(`renderer is now ${$("opt-webgpu").checked ? "webgpu" : "webgl"} — resuming`, "dim");
+          play();
+        }
+      }
+
+      function setEnabled(on) {
+        for (const id of ["reload", "refresh", "play", "probe"]) {
+          $(id).disabled = !on;
+        }
+        // `/refresh` is bearer-authenticated and the token is not shipped with a public page.
+        if (cfg.live && !cfg.refreshToken) $("refresh").disabled = true;
+      }
+
+      async function resolve(force) {
+        const magnet = $("magnet").value.trim();
+        if (!magnet) return;
+        $("resolve").disabled = true;
+        $("reresolve").disabled = true;
+        $("resolve-status").textContent = force ? "re-resolving…" : "resolving…";
+        log(`POST ${cfg.maUrl}/resolve${force ? " (force)" : ""}`, "dim");
+
+        const started = performance.now();
+        try {
+          const response = await fetch(cfg.maUrl + "/resolve", {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({ magnet, force }),
+          });
+          const body = await response.json();
+          if (!response.ok) {
+            log(`resolve failed ${response.status} ${body.error}: ${body.message}`, "bad");
+            $("resolve-status").textContent = body.error;
+            return;
+          }
+          currentId = body.id;
+          // A new torrent, so any previous choice is meaningless; `loadState` fills it back in
+          // from the record's own pick.
+          selectedFile = null;
+          currentFiles = [];
+          playing = false;
+          liveState = stateFromResolve(body);
+          const took = Math.round(performance.now() - started);
+          log(
+            `resolved ${body.id} · ${body.name} · ${body.pieceCount} pieces · ` +
+              `${body.peerCount} peers (${body.verifiedPeerCount} verified) · ${took}ms`,
+            "ok",
+          );
+          $("resolve-status").textContent = body.created ? "created" : "already known";
+          setEnabled(true);
+          await loadState();
+        } catch (err) {
+          log("resolve error: " + err.message, "bad");
+          $("resolve-status").textContent = "failed";
+        } finally {
+          $("resolve").disabled = false;
+          $("reresolve").disabled = false;
+        }
+      }
+
+      /**
+       * The stream URL for the selected file.
+       *
+       * `?file=` is sent whenever the page has a file list, including for the default pick: being
+       * explicit is what makes the tree's highlight and the bytes on the wire provably the same
+       * file. It is omitted only when there is no list, where sl-stream's own choice is all there
+       * is. Extra parameters are for the cache-buster — see the callers.
+       */
+      function streamUrl(extra = {}) {
+        const query = new URLSearchParams(extra);
+        if (selectedFile !== null && currentFiles[selectedFile]) {
+          query.set("file", String(selectedFile));
+        }
+        const search = query.toString();
+        return `${cfg.slUrl}/stream/${currentId}${search ? `?${search}` : ""}`;
+      }
+
+      /** KV itself where there is a dev server, the last resolve or refresh where there is not. */
+      async function fetchState() {
+        if (cfg.live) return liveState ?? {};
+        return await (await fetch(`dev/state?id=${currentId}`)).json();
+      }
+
+      async function loadState() {
+        if (!currentId) return;
+        const state = await fetchState();
+        const { peers, chunks, index } = state;
+
+        if (!chunks) {
+          $("state").innerHTML = '<p class="empty">No chunk record.</p>';
+          currentFiles = [];
+          selectedFile = null;
+          renderTree(null);
+          return;
+        }
+
+        currentFiles = chunks.files ?? [];
+        // A file the page has no listing for cannot be selected, so fall back to the record's own
+        // pick — which streams with no `?file=` at all.
+        if (selectedFile === null || !currentFiles[selectedFile]) {
+          selectedFile = currentFiles.length > 0 ? (chunks.fileIndex ?? 0) : null;
+        }
+        const chosen = selectedFile !== null ? currentFiles[selectedFile] : null;
+
+        const verifiedNote = peers && peers.bt > 0
+          ? `${peers.verified} verified of ${peers.bt}`
+          : "none";
+
+        $("state").innerHTML = `
+    <dl>
+      <dt>id</dt><dd>${currentId}</dd>
+      <dt>name</dt><dd>${escapeHtml(index?.name ?? chunks.name ?? "—")}</dd>
+      <dt>playing</dt><dd>${escapeHtml(chosen?.path ?? chunks.filePath ?? "—")}</dd>
+      <dt>size</dt><dd>${bytes(chosen?.length ?? chunks.fileLength)} of
+        ${bytes(chunks.totalLength)} torrent</dd>
+      <dt>pieces</dt><dd>${chunks.pieceCount} × ${bytes(chunks.pieceLength)}
+        · ${chunks.hashBytes ? bytes(chunks.hashBytes) + " of hashes" : "no hashes inline"}</dd>
+      <dt>file offset</dt><dd>${chosen?.offset ?? chunks.fileOffset}</dd>
+      <dt>bt peers</dt><dd>${peers?.bt ?? 0} (${verifiedNote})</dd>
+      <dt>webseeds</dt><dd>${peers?.webseeds ?? "— (only in KV)"}</dd>
+      <dt>peers written</dt><dd>${ago(peers?.resolvedAt)}</dd>
+      <dt>chunks written</dt><dd>${ago(chunks.resolvedAt)}</dd>
+    </dl>`;
+
+        renderTree(chunks);
+      }
+
+      function escapeHtml(text) {
+        return String(text).replace(
+          /[&<>"]/g,
+          (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[c],
+        );
+      }
+
+      /**
+       * Group the flat file list back into the directory structure it came from.
+       *
+       * A torrent stores `Season 1/ep01.mkv` as a path string, so the nesting has to be rebuilt.
+       * Each node keeps the file's **original index**, because that is what `?file=` takes and it
+       * must survive both the grouping and any filtering the checkboxes apply.
+       */
+      function buildTree(files) {
+        const root = { dirs: new Map(), files: [] };
+        files.forEach((file, index) => {
+          const parts = file.path.split("/");
+          let node = root;
+          for (const part of parts.slice(0, -1)) {
+            if (!node.dirs.has(part)) node.dirs.set(part, { dirs: new Map(), files: [] });
+            node = node.dirs.get(part);
+          }
+          // The position in the list, never a field on the entry: that is what `?file=` counts,
+          // and it is the one thing this page and sl-stream have to agree on exactly.
+          node.files.push({ ...file, index, name: parts[parts.length - 1] });
+        });
+        return root;
+      }
+
+      /**
+       * Collapse a chain of single-child directories into one row.
+       *
+       * `Show/Season 1/ep01.mkv` in a torrent with nothing else would otherwise cost two levels of
+       * indent to say one thing. Joining them reads the way a file manager's breadcrumb does.
+       */
+      function collapse(name, node) {
+        while (node.files.length === 0 && node.dirs.size === 1) {
+          const [childName, child] = [...node.dirs][0];
+          name = `${name}/${childName}`;
+          node = child;
+        }
+        return [name, node];
+      }
+
+      function treeHtml(node) {
+        const parts = [];
+        for (const [rawName, rawChild] of node.dirs) {
+          const [name, child] = collapse(rawName, rawChild);
+          const inner = treeHtml(child);
+          // A directory whose every file was filtered out is noise, not information.
+          if (!inner) continue;
+          parts.push(`<li><span class="dir">${escapeHtml(name)}/</span>${inner}</li>`);
+        }
+        for (const file of node.files) {
+          if (file.padding && !$("opt-padding").checked) continue;
+          if (!file.mime && !file.padding && !$("opt-all-files").checked) continue;
+
+          const size = `<span class="size">${bytes(file.length)}</span>`;
+          const name = `<span class="name">${escapeHtml(file.name)}</span>`;
+          if (!file.mime) {
+            const why = file.padding ? ' <span class="tag">padding</span>' : "";
+            parts.push(`<li><span class="leaf inert">${name}${why}${size}</span></li>`);
+            continue;
+          }
+          const current = file.index === selectedFile;
+          const tag = current ? ' <span class="tag">playing</span>' : "";
+          parts.push(
+            `<li><button class="leaf" data-file="${file.index}" aria-current="${current}">` +
+              `${name}${tag}${size}</button></li>`,
+          );
+        }
+        return parts.length > 0 ? `<ul>${parts.join("")}</ul>` : "";
+      }
+
+      function renderTree(chunks) {
+        const tree = $("filetree");
+        const empty = $("tree-empty");
+
+        if (!chunks) {
+          tree.hidden = true;
+          empty.hidden = false;
+          empty.textContent = "The torrent's contents appear here.";
+          return;
+        }
+        if (currentFiles.length === 0) {
+          tree.hidden = true;
+          empty.hidden = false;
+          // Worth naming: this is the one case where only the default file can be streamed, and
+          // "no files" would read as a bug rather than as the size ceiling it is.
+          empty.textContent =
+            "The chunk record was too large to carry a file list, so only the selected file " +
+            "can be streamed.";
+          return;
+        }
+
+        const html = treeHtml(buildTree(currentFiles));
+        empty.hidden = html !== "";
+        if (!html) empty.textContent = "Nothing matches the filters above.";
+        tree.hidden = html === "";
+        tree.innerHTML = html;
+
+        for (const button of tree.querySelectorAll("button[data-file]")) {
+          button.onclick = () => selectFile(Number(button.dataset.file));
+        }
+
+        $("tree-note").textContent = chunks.filesTruncated
+          ? `Showing the first ${currentFiles.length} files; the torrent has more.`
+          : "Every file the torrent contains, in the order sl-stream's ?file= indexes them. " +
+            "Pick any playable one — the pieces are shared, so switching costs no rediscovery.";
+      }
+
+      /**
+       * Switch to another file of the same torrent.
+       *
+       * Nothing is re-resolved and no peer is re-discovered: the swarm, the piece hashes and the
+       * peer list all belong to the torrent, not to one file inside it. Only the byte window moves.
+       */
+      function selectFile(index) {
+        const file = currentFiles[index];
+        if (!file || index === selectedFile) return;
+        selectedFile = index;
+        log(`file ${index} · ${file.path} · ${bytes(file.length)}`, "ok");
+        loadState();
+        if (playing) play();
+      }
+
+      async function refreshPeers() {
+        $("refresh").disabled = true;
+        log(`POST ${cfg.maUrl}/refresh`, "dim");
+        const started = performance.now();
+        try {
+          const response = await fetch(cfg.maUrl + "/refresh", {
+            method: "POST",
+            headers: {
+              "content-type": "application/json",
+              authorization: "Bearer " + cfg.refreshToken,
+            },
+            body: JSON.stringify({ id: currentId }),
+          });
+          const body = await response.json();
+          if (!response.ok) {
+            log(`refresh failed ${response.status} ${body.error}: ${body.message}`, "bad");
+            return;
+          }
+          if (liveState) {
+            liveState.peers = {
+              bt: body.peerCount,
+              verified: body.verifiedPeerCount,
+              webseeds: null,
+              resolvedAt: body.refreshedAt,
+            };
+          }
+          const took = Math.round(performance.now() - started);
+          log(
+            `refresh ${body.updated ? "rewrote the record" : "kept the existing record"} · ` +
+              `${body.peerCount} peers (${body.verifiedPeerCount} verified) · ${took}ms`,
+            body.updated ? "ok" : "warn",
+          );
+          await loadState();
+        } catch (err) {
+          log("refresh error: " + err.message, "bad");
+        } finally {
+          $("refresh").disabled = false;
+        }
+      }
+
+      /** Hand the stream to libmedia — see player.js. Everything below the url is presentation. */
+      function play() {
+        // Same reason as the verify fetch: without a cache-buster the player replays the bytes it
+        // already has and never touches sl-stream.
+        const url = streamUrl({ t: String(Date.now()) });
+        playing = true;
+        CodecPlayer.play({
+          url,
+          mount: $("libmedia"),
+          log,
+          status: (text) => {
+            $("play-status").textContent = text;
+          },
+          info: (text) => {
+            $("codec-info").textContent = text;
+          },
+          stats: (text) => {
+            $("player-stats").textContent = text;
+          },
+        }).catch((err) => {
+          playing = false;
+          $("play-status").textContent = "failed";
+          log("player error: " + err.message, "bad");
+        });
+      }
+
+      /**
+       * Fetch one piece-aligned range and check it against the torrent's own hash.
+       *
+       * The first whole piece inside the file starts at `pieceLength - (fileOffset % pieceLength)`,
+       * because the file rarely begins on a piece boundary in a multi-file torrent.
+       */
+      async function verifyPiece() {
+        $("probe").disabled = true;
+        $("play-status").textContent = "verifying…";
+        try {
+          const state = await fetchState();
+          const { pieceLength } = state.chunks;
+          // The selected file, not the record's frozen pick: a different file starts at a different
+          // torrent offset, so its first aligned piece is a different piece entirely.
+          const chosen = selectedFile !== null ? currentFiles[selectedFile] : null;
+          const fileOffset = chosen?.offset ?? state.chunks.fileOffset;
+          const fileLength = chosen?.length ?? state.chunks.fileLength;
+          const start = (pieceLength - (fileOffset % pieceLength)) % pieceLength;
+          if (start + pieceLength > fileLength) {
+            log("file is smaller than one aligned piece; nothing to verify", "warn");
+            return;
+          }
+          const end = start + pieceLength - 1;
+          const index = (fileOffset + start) / pieceLength;
+
+          const label = selectedFile === null ? currentId : `${currentId}?file=${selectedFile}`;
+          log(`GET /stream/${label} bytes=${start}-${end} (torrent piece ${index})`, "dim");
+          const started = performance.now();
+          // `no-store` is load-bearing: sl-stream sends an ETag, so a repeated range request would be
+          // answered by the browser cache and this would "pass" without a byte crossing the network —
+          // which is precisely the case a break-and-recover test must not be fooled by.
+          const response = await fetch(streamUrl(), {
+            headers: { range: `bytes=${start}-${end}` },
+            cache: "no-store",
+          });
+          if (!response.ok) {
+            log(`range request failed: ${response.status}`, "bad");
+            return;
+          }
+          const data = await response.arrayBuffer();
+          const digest = await crypto.subtle.digest("SHA-1", data);
+          const hex = [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, "0")).join(
+            "",
+          );
+          const took = Math.round(performance.now() - started);
+          log(`piece ${index}: ${bytes(data.byteLength)} in ${took}ms`, "dim");
+
+          // The assertion that matters: these bytes came off the swarm, and the torrent says what they
+          // must hash to. If this matches, discovery, the peer wire and the piece maths are all correct.
+          // Only KV holds the torrent's own hashes, so off the dev server this reports the digest
+          // of what came back and asserts nothing. Said plainly rather than shown as a pass.
+          const expected = cfg.live
+            ? { error: "piece hashes are only in KV" }
+            : await (await fetch(`dev/piece-hash?id=${currentId}&index=${index}`)).json();
+          if (expected.error) {
+            log(`sha1 ${hex} — no stored hash to compare against (${expected.error})`, "warn");
+            $("play-status").textContent = hex.slice(0, 12);
+          } else if (expected.sha1 === hex) {
+            log(`sha1 ${hex} matches the torrent — the bytes are genuine`, "ok");
+            $("play-status").textContent = "piece verified";
+          } else {
+            log(`sha1 MISMATCH: got ${hex}, torrent says ${expected.sha1}`, "bad");
+            $("play-status").textContent = "mismatch";
+          }
+          // A verify may have triggered a refresh; show what the record looks like now.
+          await loadState();
+        } catch (err) {
+          log("verify error: " + err.message, "bad");
+        } finally {
+          $("probe").disabled = false;
+        }
+      }
+
+      $("resolve").onclick = () => resolve(false);
+      $("reresolve").onclick = () => resolve(true);
+      $("preset").onclick = () => {
+        $("magnet").value = BBB;
+      };
+      $("reload").onclick = loadState;
+      $("refresh").onclick = refreshPeers;
+      $("play").onclick = play;
+      $("probe").onclick = verifyPiece;
+
+      // Filters only change what is drawn, so they redraw rather than reload.
+      $("opt-all-files").onchange = () => loadState();
+      $("opt-padding").onchange = () => loadState();
+
+      $("opt-captions").onchange = (event) => {
+        const on = event.target.checked;
+        setPref("captions", on);
+        CodecPlayer.setCaptions(on);
+        log(`captions ${on ? "on" : "off"}`, "dim");
+      };
+
+      /**
+       * The renderer can only be chosen when the player is built, and libmedia cannot be rebuilt in
+       * a live page — see `setWebGPU` in player.js. So this reloads, which is the one thing that
+       * reliably gives a clean one. `RESUME_KEY` carries the resolved id and the chosen file
+       * across, so the page comes back where it was rather than making you resolve again.
+       */
+      $("opt-webgpu").onchange = (event) => {
+        setPref("webgpu", event.target.checked);
+        try {
+          if (currentId) {
+            sessionStorage.setItem(RESUME_KEY, `${currentId}:${selectedFile ?? ""}`);
+          }
+        } catch {
+          // Same as `setPref`: without storage the toggle still applies, it just starts cold.
+        }
+        location.reload();
+      };
+
+      boot().catch((err) => log("boot failed: " + err.message, "bad"));
+    </script>
+  </body>
+</html>
