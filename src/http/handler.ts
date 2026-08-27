@@ -1,5 +1,5 @@
 /**
- * HTTP surface: `POST /resolve`, `POST /refresh` and `GET /healthz`.
+ * HTTP surface: `POST /resolve`, `POST /refresh`, `GET /records/:id` and `GET /healthz`.
  *
  * Every error path maps to a status the caller can act on — a bad magnet is the caller's problem
  * (400), a torrent with no video file is the torrent's (422), a swarm that would not answer is
@@ -12,6 +12,7 @@ import { errFields, log } from "../log.ts";
 import { MagnetError } from "../magnet.ts";
 import { DbUnavailableError } from "../db/sql.ts";
 import { refreshPeers, ResolveError, resolveMagnet } from "../resolve.ts";
+import { readRecords } from "../records_view.ts";
 
 /** A magnet URI longer than this is not a magnet URI. */
 const MAX_BODY_BYTES = 16 * 1024;
@@ -128,6 +129,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     return await handleRefresh(request);
   }
 
+  const records = /^\/records\/([^/]*)$/.exec(url.pathname);
+  if (records) {
+    if (request.method !== "GET") {
+      return problem(request, 405, "method_not_allowed", "GET /records/:id");
+    }
+    return await handleRecords(request, decodeURIComponent(records[1]!));
+  }
+
   if (url.pathname !== "/resolve") {
     return problem(request, 404, "not_found", `no route for ${request.method} ${url.pathname}`);
   }
@@ -189,6 +198,29 @@ async function handleRefresh(request: Request): Promise<Response> {
 
   try {
     return json(request, await refreshPeers(body.id.trim()), 200);
+  } catch (err) {
+    return errorResponse(request, err);
+  }
+}
+
+/**
+ * `GET /records/<40 hex>` — the stored chunk and peer records, plus sl-stream's own peer health.
+ *
+ * Behind the same bearer token as `/refresh`, for a different reason. `/refresh` is gated because
+ * it *costs*: an unauthenticated caller could aim uncapped outbound swarm work at a public VPS.
+ * This one is cheap and gated because of what it *discloses* — a peer record is a list of IP
+ * addresses of people in a swarm, and the database that holds it is otherwise reachable only with a
+ * credential. Putting that list behind an open GET would widen the service's exposure well past
+ * what adding a convenience read should.
+ *
+ * The body is `{chunks, peers, health}` — sl-stream's `start.records`, verbatim.
+ */
+async function handleRecords(request: Request, id: string): Promise<Response> {
+  if (!authorised(request)) {
+    return problem(request, 401, "unauthorized", "a valid bearer token is required");
+  }
+  try {
+    return json(request, await readRecords(id), 200);
   } catch (err) {
     return errorResponse(request, err);
   }

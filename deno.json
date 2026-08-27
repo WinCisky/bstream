@@ -4,8 +4,8 @@
     "start": "deno run --env-file --unstable-net --allow-net --allow-env --allow-read --allow-sys main.ts",
     "resolve": "deno run --env-file --unstable-net --allow-net --allow-env --allow-read --allow-sys scripts/resolve.ts",
     "migrate": "deno run --env-file --allow-net --allow-env --allow-read --allow-sys scripts/migrate.ts",
-    "test": "deno test --unstable-net --allow-net --allow-env --allow-read --allow-write --allow-sys",
-    "check": "deno check main.ts src/**/*.ts test/**/*.ts scripts/*.ts devstack/*.ts",
+    "test": "deno test --unstable-net --unstable-sloppy-imports --allow-net --allow-env --allow-read --allow-write --allow-sys",
+    "check": "deno check --unstable-sloppy-imports main.ts src/**/*.ts test/**/*.ts scripts/*.ts devstack/*.ts",
     "verify": "deno fmt --check && deno lint && deno task check && deno task test"
   },
   "imports": {

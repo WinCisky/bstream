@@ -123,6 +123,42 @@ Deno.test("auth is checked before the body is even parsed", async () => {
 // CORS origin selection. `Access-Control-Allow-Origin` carries one value, so with several origins
 // configured the matching one has to be echoed back rather than the first in the list.
 
+Deno.test("records with no token configured refuses every caller", async () => {
+  // Same closed-by-default posture as /refresh, and checked before the id is even looked at, so an
+  // unauthenticated caller cannot use the 400/404 split to probe which ids exist.
+  const response = await handleRequest(
+    new Request(`http://localhost/records/${"a".repeat(40)}`),
+  );
+  assertEquals(response.status, 401);
+  assertEquals((await response.json()).error, "unauthorized");
+});
+
+Deno.test("records rejects a bearer token when none is configured", async () => {
+  const response = await handleRequest(
+    new Request(`http://localhost/records/${"a".repeat(40)}`, {
+      headers: { authorization: "Bearer anything" },
+    }),
+  );
+  assertEquals(response.status, 401);
+});
+
+Deno.test("a malformed id is refused before the database, not after", async () => {
+  // 401 rather than 400: auth runs first, so this never opens a connection either way.
+  const response = await handleRequest(new Request("http://localhost/records/nope"));
+  assertEquals(response.status, 401);
+});
+
+Deno.test("POST /records/:id is 405", async () => {
+  const response = await handleRequest(post({}, `/records/${"a".repeat(40)}`));
+  assertEquals(response.status, 405);
+});
+
+Deno.test("bare /records with no id is 404", async () => {
+  const response = await handleRequest(new Request("http://localhost/records"));
+  assertEquals(response.status, 404);
+  assertEquals((await response.json()).error, "not_found");
+});
+
 Deno.test("a configured origin is echoed back when it matches", () => {
   const allowed = ["https://sl-stream.simo.deno.net", "https://wincisky.github.io"];
   assertEquals(

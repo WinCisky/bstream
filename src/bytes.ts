@@ -59,3 +59,18 @@ export function toText(bytes: Uint8Array): string {
 }
 
 export const encoder = new TextEncoder();
+
+/**
+ * Standard base64, for the piece-hash blob on its way into JSON.
+ *
+ * `btoa` takes a binary string, and spreading a 2.4 MB `Uint8Array` into `String.fromCharCode`
+ * overflows the argument limit, so the conversion runs in chunks.
+ */
+export function toBase64(bytes: Uint8Array): string {
+  const CHUNK = 0x8000;
+  let binary = "";
+  for (let i = 0; i < bytes.length; i += CHUNK) {
+    binary += String.fromCharCode(...bytes.subarray(i, i + CHUNK));
+  }
+  return btoa(binary);
+}

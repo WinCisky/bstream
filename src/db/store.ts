@@ -20,13 +20,15 @@
 
 import { log } from "../log.ts";
 import type { Database, Executor } from "./sql.ts";
-import type { ChunksRecord, MagnetIndexRecord, PeersRecord } from "./records.ts";
+import type { ChunksRecord, MagnetIndexRecord, PeerHealthEntry, PeersRecord } from "./records.ts";
 import {
   type ChunksRow,
   type MagnetRow,
+  type PeerHealthRow,
   type PeersRow,
   toChunksRecord,
   toMagnetIndex,
+  toPeerHealthEntry,
   toPeersRecord,
 } from "./rows.ts";
 
@@ -177,6 +179,27 @@ export async function readBannedPeers(db: Executor, id: string, now: number): Pr
     [id, now],
   );
   return new Set(result.rows.map((row) => row.peer_key));
+}
+
+/**
+ * The whole health table for an id, not just the ban filter.
+ *
+ * `readBannedPeers` answers the only question a refresh has ("which peers are dead"), so it fetches
+ * keys and nothing else. `GET /records/:id` hands sl-stream back its own bookkeeping — counts and
+ * expiry included — because sl-stream's `normalizeHealth` re-derives the ban set itself against its
+ * own clock, and a bare key list cannot be re-derived from.
+ *
+ * Rows with a null or elapsed `banned_until` are returned too: a peer with fifty failures and no
+ * live ban is still worth knowing about, and filtering here would hide it.
+ */
+export async function readPeerHealth(db: Executor, id: string): Promise<PeerHealthEntry[]> {
+  const result = await db.query<PeerHealthRow>(
+    `select peer_key, banned_until, ok, fails
+       from peer_health where id = $1
+      order by peer_key`,
+    [id],
+  );
+  return result.rows.map(toPeerHealthEntry);
 }
 
 export async function persist(db: Database, input: PersistInput): Promise<PersistResult> {

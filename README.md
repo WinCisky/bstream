@@ -4,8 +4,9 @@ Turns a magnet link into an id, and writes the peer list and chunk list that
 [sl-stream](../sl-stream) reads out of Postgres.
 
 ```
-POST /resolve  {"magnet": "magnet:?xt=urn:btih:..."}  ->  200 {"id": "08ada5…", …}
-POST /refresh  {"id": "08ada5…"}                      ->  200 {"peerCount": 186, …}
+POST /resolve      {"magnet": "magnet:?xt=urn:btih:..."}  ->  200 {"id": "08ada5…", …}
+POST /refresh      {"id": "08ada5…"}                      ->  200 {"peerCount": 186, …}
+GET  /records/:id                                         ->  200 {"chunks": …, "peers": …, "health": …}
 ```
 
 sl-stream runs on Deno Deploy and, given an id, point-reads one row from `peer_records` and one from
@@ -72,6 +73,7 @@ seconds of swarm work, so nothing is lost by leaving it there.
 | `MA_DHT_MAX_NODES`                          | `200`     | Nodes queried before the walk stops.                                    |
 | `MA_ALLOW_PRIVATE_PEERS`                    | `false`   | Allow loopback/RFC 1918 peers. See "Address hygiene".                   |
 | `MA_ENABLE_UDP` / `_HTTP` / `_DHT` / `_PEX` | `true`    | Individually switchable discovery sources.                              |
+| `MA_REFRESH_TOKEN`                          | _(empty)_ | Bearer token for `/refresh` and `/records/:id`. Unset means both 401.   |
 | `MA_LOG_LEVEL`                              | `info`    | `debug`, `info`, `warn`, `error`.                                       |
 
 ## How a resolve works
@@ -266,6 +268,41 @@ things make this cheap and safe:
 Auth is a shared bearer token, compared in constant time. An unset `MA_REFRESH_TOKEN` returns 401
 for every request rather than running open — the route does uncapped outbound swarm work on a public
 host, so "unconfigured" has to mean closed.
+
+## Reading the records back
+
+`GET /records/<40 hex>` returns the two stored records and sl-stream's own peer health, in one read:
+
+```bash
+curl -H 'authorization: Bearer $MA_REFRESH_TOKEN' \
+  https://ma-stream.example/records/dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c
+```
+
+```json
+{ "chunks": { "pieces": "…base64…", "files": [ … ], … }, "peers": { … }, "health": [ … ] }
+```
+
+The body is exactly the object a consumer inlines as its records — the same three keys, in the same
+shapes. That is the point of the route. sl-stream reaches the two rows itself over PostgREST, which
+costs it two of a Cloudflare Worker's fifty subrequests and requires a database credential at the
+edge; a caller that already holds the records can inline them into the `start` frame instead and
+spend neither. `test/consumer_contract_test.ts` runs the route's JSON through the consuming Worker's
+actual `normalizeRecords`, so the two ends cannot drift apart quietly.
+
+Two representation notes, both forced by JSON:
+
+- **`pieces` is base64.** The record holds `pieceCount * 20` raw bytes. Readers accept base64,
+  `\x`-hex bytea or a JSON `Buffer`; base64 is the compact one — 3.2 MB against 4.8 MB at 120 000
+  pieces.
+- **`health` is an array and is usually empty.** `peer_health` is sl-stream's table to write and
+  starts empty for every id, so `[]` means "nothing has been streamed yet", not "record missing".
+
+Missing either record is a 404 rather than a half answer: `persist` writes both in one transaction,
+so "chunks but no peers" is not a state this service can produce.
+
+Unlike `/refresh`, this route costs nothing to serve — three point queries, no swarm, no writes. It
+is behind the same `MA_REFRESH_TOKEN` for the other reason: a peer record is a list of IP addresses
+of people in a swarm, and the database holding it is otherwise reachable only with a credential.
 
 ## Address hygiene
 

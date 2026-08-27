@@ -19,11 +19,12 @@
  * reads.
  */
 
-import { bytes, num } from "./sql.ts";
+import { bytes, num, numOrNull } from "./sql.ts";
 import type {
   ChunkFileEntry,
   ChunksRecord,
   MagnetIndexRecord,
+  PeerHealthEntry,
   PeerRecordItem,
   PeersRecord,
 } from "./records.ts";
@@ -63,6 +64,13 @@ export interface ChunksRow extends Record<string, unknown> {
   file_length: unknown;
   mime: string;
   resolved_at: unknown;
+}
+
+export interface PeerHealthRow extends Record<string, unknown> {
+  peer_key: string;
+  banned_until: unknown;
+  ok: unknown;
+  fails: unknown;
 }
 
 export function toMagnetIndex(row: MagnetRow): MagnetIndexRecord {
@@ -106,5 +114,20 @@ export function toChunksRecord(row: ChunksRow): ChunksRecord {
     fileLength: num(row.file_length),
     mime: row.mime,
     resolvedAt: num(row.resolved_at),
+  };
+}
+
+/**
+ * `banned_until` is the one nullable instant in the schema, and `num()` would turn its null into a
+ * `0` that reads as "banned until the epoch" — a real ban that has expired, rather than a peer that
+ * was never banned. `numOrNull` keeps the two apart, and sl-stream's reader relies on it: its
+ * `normalizeHealth` skips a null and compares anything else against its own clock.
+ */
+export function toPeerHealthEntry(row: PeerHealthRow): PeerHealthEntry {
+  return {
+    peerKey: row.peer_key,
+    bannedUntil: numOrNull(row.banned_until),
+    ok: num(row.ok),
+    fails: num(row.fails),
   };
 }
