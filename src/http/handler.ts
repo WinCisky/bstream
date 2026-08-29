@@ -1,5 +1,6 @@
 /**
- * HTTP surface: `POST /resolve`, `POST /refresh`, `GET /records/:id` and `GET /healthz`.
+ * HTTP surface: `POST /resolve`, `POST /refresh`, `GET /records/:id`, `GET /peers/:id` and
+ * `GET /healthz`.
  *
  * Every error path maps to a status the caller can act on — a bad magnet is the caller's problem
  * (400), a torrent with no video file is the torrent's (422), a swarm that would not answer is
@@ -13,6 +14,7 @@ import { MagnetError } from "../magnet.ts";
 import { DbUnavailableError } from "../db/sql.ts";
 import { refreshPeers, ResolveError, resolveMagnet } from "../resolve.ts";
 import { readRecords } from "../records_view.ts";
+import { parseRefreshMode, readPeersView } from "../peers_view.ts";
 
 /** A magnet URI longer than this is not a magnet URI. */
 const MAX_BODY_BYTES = 16 * 1024;
@@ -129,6 +131,14 @@ export async function handleRequest(request: Request): Promise<Response> {
     return await handleRefresh(request);
   }
 
+  const peers = /^\/peers\/([^/]*)$/.exec(url.pathname);
+  if (peers) {
+    if (request.method !== "GET") {
+      return problem(request, 405, "method_not_allowed", "GET /peers/:id");
+    }
+    return await handlePeers(request, decodeURIComponent(peers[1]!), url);
+  }
+
   const records = /^\/records\/([^/]*)$/.exec(url.pathname);
   if (records) {
     if (request.method !== "GET") {
@@ -221,6 +231,29 @@ async function handleRecords(request: Request, id: string): Promise<Response> {
   }
   try {
     return json(request, await readRecords(id), 200);
+  } catch (err) {
+    return errorResponse(request, err);
+  }
+}
+
+/**
+ * `GET /peers/<40 hex>` — the peers to dial to recover this id's chunks.
+ *
+ * The narrow read next to `/records/:id`: no piece hashes, no file list, banned peers already
+ * removed and the rest ordered by what is worth dialling first. A client whose peers have gone
+ * dead wants exactly this and would otherwise pull megabytes of hashes it already has to get it.
+ *
+ * `?refresh=auto` pays for a swarm walk only when the stored answer is stale or empty; `?refresh=1`
+ * always walks. Behind the same bearer token as `/records/:id`, for the same reason — the body is
+ * a list of IP addresses of people in a swarm — and, with `?refresh=`, for `/refresh`'s reason too.
+ */
+async function handlePeers(request: Request, id: string, url: URL): Promise<Response> {
+  if (!authorised(request)) {
+    return problem(request, 401, "unauthorized", "a valid bearer token is required");
+  }
+  try {
+    const refresh = parseRefreshMode(url.searchParams.get("refresh"));
+    return json(request, await readPeersView(id, { refresh }), 200);
   } catch (err) {
     return errorResponse(request, err);
   }

@@ -7,6 +7,7 @@ Turns a magnet link into an id, and writes the peer list and chunk list that
 POST /resolve      {"magnet": "magnet:?xt=urn:btih:..."}  ->  200 {"id": "08ada5…", …}
 POST /refresh      {"id": "08ada5…"}                      ->  200 {"peerCount": 186, …}
 GET  /records/:id                                         ->  200 {"chunks": …, "peers": …, "health": …}
+GET  /peers/:id                                           ->  200 {"peers": [ … ], "count": 186, "stale": false, …}
 ```
 
 sl-stream runs on Deno Deploy and, given an id, point-reads one row from `peer_records` and one from
@@ -54,27 +55,28 @@ Append `?sslmode=require`; postgres.js reads it out of the URL. The default `MA_
 the only setting correct on all three rows, and this service issues a handful of queries against
 seconds of swarm work, so nothing is lost by leaving it there.
 
-| Variable                                    | Default   | Meaning                                                                 |
-| ------------------------------------------- | --------- | ----------------------------------------------------------------------- |
-| `MA_DATABASE_URL`                           | _(empty)_ | Postgres connection string. **Required**; unset makes `/resolve` a 503. |
-| `MA_DB_PREPARE`                             | `false`   | Named prepared statements. Must stay off on a transaction pooler.       |
-| `MA_DB_POOL_SIZE`                           | `5`       | Connections held open.                                                  |
-| `MA_DB_CONNECT_TIMEOUT_MS`                  | `10000`   | Per-connection budget.                                                  |
-| `MA_DB_IDLE_TIMEOUT_MS`                     | `0`       | 0 keeps connections; set ~30000 behind a per-connection-priced pooler.  |
-| `MA_RESOLVE_DEADLINE_MS`                    | `45000`   | Hard ceiling on one resolve.                                            |
-| `MA_MIN_PEERS`                              | `40`      | Stop early once metadata is in and this many peers are known.           |
-| `MA_MAX_PEERS`                              | `500`     | Cap on peers persisted.                                                 |
-| `MA_PEER_GRACE_MS`                          | `3000`    | Extra collection time after metadata lands.                             |
-| `MA_MAX_DIALS`                              | `50`      | Concurrent peer sessions.                                               |
-| `MA_CONNECT_TIMEOUT_MS`                     | `3000`    | TCP connect budget per peer.                                            |
-| `MA_SESSION_TIMEOUT_MS`                     | `6000`    | Whole-session budget per peer.                                          |
-| `MA_TRACKER_TIMEOUT_MS`                     | `3000`    | Per-tracker budget.                                                     |
-| `MA_DHT_BUDGET_MS`                          | `20000`   | DHT walk budget.                                                        |
-| `MA_DHT_MAX_NODES`                          | `200`     | Nodes queried before the walk stops.                                    |
-| `MA_ALLOW_PRIVATE_PEERS`                    | `false`   | Allow loopback/RFC 1918 peers. See "Address hygiene".                   |
-| `MA_ENABLE_UDP` / `_HTTP` / `_DHT` / `_PEX` | `true`    | Individually switchable discovery sources.                              |
-| `MA_REFRESH_TOKEN`                          | _(empty)_ | Bearer token for `/refresh` and `/records/:id`. Unset means both 401.   |
-| `MA_LOG_LEVEL`                              | `info`    | `debug`, `info`, `warn`, `error`.                                       |
+| Variable                                    | Default   | Meaning                                                                        |
+| ------------------------------------------- | --------- | ------------------------------------------------------------------------------ |
+| `MA_DATABASE_URL`                           | _(empty)_ | Postgres connection string. **Required**; unset makes `/resolve` a 503.        |
+| `MA_DB_PREPARE`                             | `false`   | Named prepared statements. Must stay off on a transaction pooler.              |
+| `MA_DB_POOL_SIZE`                           | `5`       | Connections held open.                                                         |
+| `MA_DB_CONNECT_TIMEOUT_MS`                  | `10000`   | Per-connection budget.                                                         |
+| `MA_DB_IDLE_TIMEOUT_MS`                     | `0`       | 0 keeps connections; set ~30000 behind a per-connection-priced pooler.         |
+| `MA_RESOLVE_DEADLINE_MS`                    | `45000`   | Hard ceiling on one resolve.                                                   |
+| `MA_MIN_PEERS`                              | `40`      | Stop early once metadata is in and this many peers are known.                  |
+| `MA_MAX_PEERS`                              | `500`     | Cap on peers persisted.                                                        |
+| `MA_PEER_GRACE_MS`                          | `3000`    | Extra collection time after metadata lands.                                    |
+| `MA_MAX_DIALS`                              | `50`      | Concurrent peer sessions.                                                      |
+| `MA_CONNECT_TIMEOUT_MS`                     | `3000`    | TCP connect budget per peer.                                                   |
+| `MA_SESSION_TIMEOUT_MS`                     | `6000`    | Whole-session budget per peer.                                                 |
+| `MA_TRACKER_TIMEOUT_MS`                     | `3000`    | Per-tracker budget.                                                            |
+| `MA_DHT_BUDGET_MS`                          | `20000`   | DHT walk budget.                                                               |
+| `MA_DHT_MAX_NODES`                          | `200`     | Nodes queried before the walk stops.                                           |
+| `MA_ALLOW_PRIVATE_PEERS`                    | `false`   | Allow loopback/RFC 1918 peers. See "Address hygiene".                          |
+| `MA_ENABLE_UDP` / `_HTTP` / `_DHT` / `_PEX` | `true`    | Individually switchable discovery sources.                                     |
+| `MA_REFRESH_TOKEN`                          | _(empty)_ | Bearer token for `/refresh`, `/records/:id` and `/peers/:id`. Unset means 401. |
+| `MA_PEERS_STALE_MS`                         | `600000`  | Age at which `/peers/:id` reports `stale: true`.                               |
+| `MA_LOG_LEVEL`                              | `info`    | `debug`, `info`, `warn`, `error`.                                              |
 
 ## How a resolve works
 
@@ -303,6 +305,48 @@ so "chunks but no peers" is not a state this service can produce.
 Unlike `/refresh`, this route costs nothing to serve — three point queries, no swarm, no writes. It
 is behind the same `MA_REFRESH_TOKEN` for the other reason: a peer record is a list of IP addresses
 of people in a swarm, and the database holding it is otherwise reachable only with a credential.
+
+## Just the peers
+
+`GET /peers/<40 hex>` answers the one question a client with a dead swarm actually has — _who do I
+dial now_ — without the 2.4 MB of piece hashes `/records/:id` carries alongside it:
+
+```bash
+curl -H 'authorization: Bearer $MA_REFRESH_TOKEN' \
+  https://ma-stream.example/peers/dd8255ecdc7ca55fb0bbf81323d87062db1f6d1c
+```
+
+```json
+{
+  "id": "dd8255ec…",
+  "resolvedAt": 1700000000000,
+  "ageMs": 42000,
+  "stale": false,
+  "count": 186,
+  "peers": ["https://cdn.example/file.mkv", { "ip": "1.2.3.4", "port": 6881, "verified": true }],
+  "webseeds": ["https://cdn.example/file.mkv"],
+  "bannedCount": 3,
+  "refreshed": false
+}
+```
+
+Three things happen here that a raw read of `peer_records` leaves to the caller:
+
+- **Banned peers are dropped**, by the same `where banned_until > now` filter `/refresh` applies
+  before writing — applied on the way out, so a ban recorded since the last write counts too.
+  `bannedCount` says how many went.
+- **The list is ordered by what is worth dialling.** Webseeds first — HTTP range endpoints serve
+  bytes on the first request while the swarm is still handshaking — then peers that completed a
+  BitTorrent handshake during the walk that found them, then tracker hearsay. `count` counts the
+  BitTorrent endpoints only; webseeds are in `peers` as well as in `webseeds`.
+- **Staleness is stated, not implied.** `ageMs` and `stale` (against `MA_PEERS_STALE_MS`) let a
+  caller decide whether to spend a refresh rather than infer rot from a timestamp.
+
+`?refresh=auto` walks the swarm first, but only when the answer would be stale or every peer is
+banned; `?refresh=1` always walks. Both are opt-in, so the plain route stays two point queries and
+no outbound traffic, and `refreshed` reports whether a walk actually rewrote the record. An id with
+a record whose every peer is banned is an empty list and a 200 — "nothing here is worth dialling" is
+a different answer from the 404 an unresolved id gets.
 
 ## Address hygiene
 

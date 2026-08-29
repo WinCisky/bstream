@@ -84,6 +84,13 @@ export const config = Object.freeze({
    */
   refreshToken: envStr("MA_REFRESH_TOKEN", ""),
 
+  /**
+   * How old a peer record may be before `GET /peers/:id` calls it stale. Swarm membership turns
+   * over in minutes, so this is a "worth re-walking" threshold and not an expiry: a stale record is
+   * still returned, just flagged, and `?refresh=auto` is what acts on the flag.
+   */
+  peersStaleMs: envInt("MA_PEERS_STALE_MS", 10 * 60_000, 0),
+
   trackerTimeoutMs: envInt("MA_TRACKER_TIMEOUT_MS", 3_000),
   dhtBudgetMs: envInt("MA_DHT_BUDGET_MS", 20_000),
   dhtMaxNodes: envInt("MA_DHT_MAX_NODES", 200, 8, 5_000),

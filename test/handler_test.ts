@@ -153,6 +153,27 @@ Deno.test("POST /records/:id is 405", async () => {
   assertEquals(response.status, 405);
 });
 
+Deno.test("peers with no token configured refuses every caller", async () => {
+  // Same closed-by-default posture as /records: the body is a list of IP addresses of people in a
+  // swarm, and `?refresh=` can spend outbound swarm work on top.
+  const response = await handleRequest(
+    new Request(`http://localhost/peers/${"a".repeat(40)}?refresh=auto`),
+  );
+  assertEquals(response.status, 401);
+  assertEquals((await response.json()).error, "unauthorized");
+});
+
+Deno.test("POST /peers/:id is 405", async () => {
+  const response = await handleRequest(post({}, `/peers/${"a".repeat(40)}`));
+  assertEquals(response.status, 405);
+});
+
+Deno.test("bare /peers with no id is 404", async () => {
+  const response = await handleRequest(new Request("http://localhost/peers"));
+  assertEquals(response.status, 404);
+  assertEquals((await response.json()).error, "not_found");
+});
+
 Deno.test("bare /records with no id is 404", async () => {
   const response = await handleRequest(new Request("http://localhost/records"));
   assertEquals(response.status, 404);
